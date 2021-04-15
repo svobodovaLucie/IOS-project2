@@ -8,6 +8,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 /**
  * Argument parser
@@ -67,7 +70,24 @@ int cleanup(FILE *f_out) {
     fclose(f_out);
     // unmap sdilene pameti
     // close semaforu
+    return 0;
 }
+
+void santa_process() {
+    printf("[santa] pid %d from [parent] pid %d\n", getpid(),getppid());
+    exit(0);
+}
+
+void elf_process(unsigned i) {
+    printf("[elf number %u] pid %d from [parent] pid %d\n", i, getpid(),getppid());
+    exit(0);
+}
+
+void reindeer_process(unsigned i) {
+    printf("[reindeer number %u] pid %d from [parent] pid %d\n", i, getpid(), getppid());
+    exit(0);
+}
+
 /********************************************************************************************/
 int main(int argc, char *argv[]) {
 
@@ -83,33 +103,88 @@ int main(int argc, char *argv[]) {
         printf("Invalid arguments.\n");
         return 1;
     }
-
+    /*
     FILE *f_out = fopen("proj2.out", "w");
     if (f_out == NULL) {
         fprintf(stderr, "Error when opening file proj2.out\n");
         return 1;
     }
-    
+    */
     if (initialize()) {
         return 1;
     }
 
+    //printf("NE (num of elves) is: %u\n", ne);
+    //printf("NR (num of reindeers) is: %u\n", nr);
+    //printf("TE is: %u\n", te);
+    //printf("TR is: %u\n", tr);
 
-    printf("NE is: %u\n", ne);
-    printf("NR is: %u\n", nr);
-    printf("TE is: %u\n", te);
-    printf("TR is: %u\n", tr);
+    // creating processes
+    /* Hlavní proces vytváří ihned po spuštění jeden proces Santa, NE procesů skřítků a NR procesů sobů. */
+    // parent process will be the Santa process
+    // child process will generate elves and reindeers
+    pid_t process_ID = fork();
 
+    if (process_ID == 0) {
+        // santa process
+        santa_process();
+    } else if (process_ID < 0) {    // error
+        //cleanup(f_out);
+        fprintf(stderr, "PID is <0.\n");
+    }
+    // zde bezi main process
+    process_ID = fork();
+    if (process_ID == 0) {
+        // branch that generates elves ad reindeers
+        process_ID = fork();
+        if (process_ID == 0) {
+            // branch that generates elves
+            for (unsigned i = 0; i < ne; i++) { // nebo i<(ne-1), protoze posledni elf je generovan z pid > 0?
+                pid_t elf_ID = fork();
+                if (elf_ID == 0) {
+                    // new elf generated
+                    elf_process(i);
+                } else if (elf_ID < 0) {    // error
+                    //cleanup(f_out);
+                    fprintf(stderr, "PID je <0.\n");
+                }
+                // není tady poslední elf?
+            }
+        } else if (process_ID > 0) {
+            // branch that generates reindeers
+            for (unsigned i = 0; i < nr; i++) { // nr - 1, protoze posledni elf je generovan z pid > 0?
+                pid_t reindeer_ID = fork();
+                if (reindeer_ID == 0) {
+                    // new elf generated
+                    reindeer_process(i);
+                } else if (reindeer_ID < 0) {   // error
+                    //cleanup(f_out);
+                    fprintf(stderr, "PID je <0.\n");
+                }
+                // poslední reindeer? 
+            }
+        } else {    // error
+            //cleanup(f_out);
+            fprintf(stderr, "PID je <0.\n");
+        }
+    } else if (process_ID < 0) {    // error
+        //cleanup(f_out);
+        fprintf(stderr, "PID je <0.\n");
+    }
 
+    // zde bezi main process
 
-
-
-
-
-
+    /* Poté čeká na ukončení všech procesů, které aplikace vytváří. Jakmile jsou tyto procesy ukončeny, ukončí se i hlavní proces s kódem (exit code) 0 */
+    // main process waits for other processes to end
+    for (unsigned i = 0; i < (nr + ne + 1); i++) {  // +1 == +Santa
+        wait(NULL);
+    }
+    
+    /*
     if (cleanup(f_out)) {
         return 1;
     }
+    */
     return 0;
 
 }
