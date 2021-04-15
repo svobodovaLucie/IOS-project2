@@ -1,5 +1,7 @@
 /**
  * HEADER
+ * FIT VUT - IOS 2020/2021
+ * Projekt 2
  * 
  * 
  */
