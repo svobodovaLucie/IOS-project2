@@ -12,6 +12,10 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#include <time.h>
+
+
+
 /**
  * Argument parser
  * 
@@ -73,18 +77,36 @@ int cleanup(FILE *f_out) {
     return 0;
 }
 
-void santa_process() {
-    printf("[santa] pid %d from [parent] pid %d\n", getpid(),getppid());
+void santa_process(FILE *f) {
+    //printf("[santa] pid %d from [parent] pid %d\n", getpid(),getppid());
+    fprintf(f, "A: Santa: going to sleep\n");    // TODO change A to the number of action (shared mem)
+    fflush(f);
     exit(0);
 }
 
-void elf_process(unsigned i) {
-    printf("[elf number %u] pid %d from [parent] pid %d\n", i, getpid(),getppid());
+void elf_process(FILE *f, unsigned elfID, unsigned te) {
+    //printf("[elf number %u] pid %d from [parent] pid %d\n", elfID, getpid(),getppid());
+    fprintf(f, "A: Elf %u: started\n", elfID+1);    // TODO change A to the number of action (shared mem)
+    fflush(f);
+
+    // generate random time for that an elf is working independently
+    srand(time(NULL) * getpid() + elfID);
+    if (usleep((rand() % (te + 1)))) {
+        // error
+    }
     exit(0);
 }
 
-void reindeer_process(unsigned i) {
-    printf("[reindeer number %u] pid %d from [parent] pid %d\n", i, getpid(), getppid());
+void reindeer_process(FILE *f, unsigned rdID, unsigned tr) {
+    //printf("[reindeer number %u] pid %d from [parent] pid %d\n", rdID, getpid(), getppid());
+    fprintf(f, "A: RD %u: rstarted\n", rdID+1);    // TODO change A to the number of action (shared mem)
+    fflush(f);
+
+    // generate random time for that a reindeer is on holiday
+    srand(time(NULL) * getpid() + rdID);
+    if (usleep((rand() % (tr - tr/2 + 1) + tr/2))) {
+        // error
+    }
     exit(0);
 }
 
@@ -97,22 +119,27 @@ int main(int argc, char *argv[]) {
         printf("The number of arguments is %d\n", argc);
         return 1;
     }
-    if (argument_parser(argv, &ne, &nr, &te, &tr)) {
-        // cleanup();
-        // help vypis
-        printf("Invalid arguments.\n");
-        return 1;
-    }
-    /*
     FILE *f_out = fopen("proj2.out", "w");
     if (f_out == NULL) {
         fprintf(stderr, "Error when opening file proj2.out\n");
         return 1;
     }
-    */
+
+    if (argument_parser(argv, &ne, &nr, &te, &tr)) {
+        cleanup(f_out);
+        // help vypis
+        printf("Invalid arguments.\n");
+        return 1;
+    }
+    
     if (initialize()) {
         return 1;
     }
+
+    srand(time(NULL));
+
+    
+
 
     //printf("NE (num of elves) is: %u\n", ne);
     //printf("NR (num of reindeers) is: %u\n", nr);
@@ -127,9 +154,9 @@ int main(int argc, char *argv[]) {
 
     if (process_ID == 0) {
         // santa process
-        santa_process();
+        santa_process(f_out);
     } else if (process_ID < 0) {    // error
-        //cleanup(f_out);
+        cleanup(f_out);
         fprintf(stderr, "PID is <0.\n");
     }
     // zde bezi main process
@@ -143,9 +170,9 @@ int main(int argc, char *argv[]) {
                 pid_t elf_ID = fork();
                 if (elf_ID == 0) {
                     // new elf generated
-                    elf_process(i);
+                    elf_process(f_out, i, te);
                 } else if (elf_ID < 0) {    // error
-                    //cleanup(f_out);
+                    cleanup(f_out);
                     fprintf(stderr, "PID je <0.\n");
                 }
                 // není tady poslední elf?
@@ -156,19 +183,19 @@ int main(int argc, char *argv[]) {
                 pid_t reindeer_ID = fork();
                 if (reindeer_ID == 0) {
                     // new elf generated
-                    reindeer_process(i);
+                    reindeer_process(f_out, i, tr);
                 } else if (reindeer_ID < 0) {   // error
-                    //cleanup(f_out);
+                    cleanup(f_out);
                     fprintf(stderr, "PID je <0.\n");
                 }
                 // poslední reindeer? 
             }
         } else {    // error
-            //cleanup(f_out);
+            cleanup(f_out);
             fprintf(stderr, "PID je <0.\n");
         }
     } else if (process_ID < 0) {    // error
-        //cleanup(f_out);
+        cleanup(f_out);
         fprintf(stderr, "PID je <0.\n");
     }
 
@@ -180,11 +207,11 @@ int main(int argc, char *argv[]) {
         wait(NULL);
     }
     
-    /*
+    
     if (cleanup(f_out)) {
         return 1;
     }
-    */
+    
     return 0;
 
 }
