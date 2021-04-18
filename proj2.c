@@ -121,6 +121,7 @@ void init_semaphores(FILE *f)
     sem_unlink(PRINTING_SEM);
 
     bool error = false;
+    /*
     // map named semaphores
     if((santa_sem = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0)) == MAP_FAILED)
         error = true;
@@ -134,7 +135,7 @@ void init_semaphores(FILE *f)
         error = true;
     if((printing = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0)) == MAP_FAILED)
         error = true;
-
+    */
     // open semaphores
     if ((santa_sem = sem_open(SANTA_SEM, O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED)
         error = true;
@@ -420,7 +421,7 @@ void santa_process(FILE *f, args_t args) {
  */
 void elf_process(FILE *f, unsigned elfID, args_t args) {
     // elf works in a loop until holidays start
-    //while (1) {
+    while (1) {
 
         // elf started
         elf_message(f, ELF_START, elfID);
@@ -435,14 +436,14 @@ void elf_process(FILE *f, unsigned elfID, args_t args) {
         elf_message(f, ELF_NEED, elfID);
         
         // when Christmas warning is on the workshop elves take holidays
-        // WHY MUTEX DOESN'T WORK???????????????????????????????????????????
-      //  sem_wait(mutex);
+        sem_wait(mutex);
             // critical section
-     //       if (sh_mem->workshop_closed) {
-    //            sem_post(mutex);
-      //          break;
-     //       }
-     //   sem_post(mutex);        
+            if (sh_mem->workshop_closed) {
+                sem_post(mutex);
+                break;
+            }
+        sem_post(mutex);    
+
         // he waits in front of workshop and when 3 elves are waiting
         // they wake up Santa
 
@@ -451,7 +452,7 @@ void elf_process(FILE *f, unsigned elfID, args_t args) {
         // they go back to work
 
         
-    //}
+    }
     elf_message(f, ELF_HOLIDAYS, elfID);
     (void)args;
     exit(0);
