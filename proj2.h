@@ -22,7 +22,7 @@
 // define semafor names
 #define SANTA_SEM "/xsvobo1x-santa_sem"
 #define ELVES_SEM "/xsvobo1x-elves_sem"
-#define ELVES_HOLIDAYS "/xsvobo1x-elves_holidays"
+#define CHRISTMAS_WAIT "/xsvobo1x-christmas_wait"
 #define REINDEERS_SEM "/xsvobo1x-reindeers_sem"
 #define MUTEX_SEM "/xsvobo1x-mutex"
 #define PRINTING_SEM "/xsvobo1x-printing"
@@ -47,7 +47,7 @@ typedef struct args {
     unsigned tr;
 } args_t;
 
-sem_t *santa_sem, *elves_sem, *elves_holidays, *reindeers_sem, *mutex, *printing;
+sem_t *santa_sem, *elves_sem, *christmas_wait, *reindeers_sem, *mutex, *printing;
 
 shared_t *sh_mem = NULL;
 

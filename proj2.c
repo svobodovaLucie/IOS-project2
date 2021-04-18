@@ -115,7 +115,7 @@ void init_semaphores(FILE *f)
     // just to be sure they don't exist
     sem_unlink(SANTA_SEM);
     sem_unlink(ELVES_SEM);
-    sem_unlink(ELVES_HOLIDAYS);
+    sem_unlink(CHRISTMAS_WAIT);
     sem_unlink(REINDEERS_SEM);
     sem_unlink(MUTEX_SEM);
     sem_unlink(PRINTING_SEM);
@@ -126,7 +126,7 @@ void init_semaphores(FILE *f)
         error = true;
     if((elves_sem = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0)) == MAP_FAILED)
         error = true;
-    if((elves_holidays = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0)) == MAP_FAILED)
+    if((christmas_wait = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0)) == MAP_FAILED)
         error = true;
     if((reindeers_sem = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0)) == MAP_FAILED)
         error = true;
@@ -140,7 +140,7 @@ void init_semaphores(FILE *f)
         error = true;
     if ((elves_sem = sem_open(ELVES_SEM, O_CREAT | O_EXCL, 0666, 1)) == SEM_FAILED)
         error = true;
-    if ((elves_holidays = sem_open(ELVES_HOLIDAYS, O_CREAT | O_EXCL, 0666, 1)) == SEM_FAILED)
+    if ((christmas_wait = sem_open(CHRISTMAS_WAIT, O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED)
         error = true;
     if ((reindeers_sem = sem_open(REINDEERS_SEM, O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED)
         error = true;
@@ -179,7 +179,7 @@ void cleanup_semaphores(FILE *f)
         error = true;
     if(sem_close(elves_sem))
         error = true;
-    if(sem_close(elves_holidays))
+    if(sem_close(christmas_wait))
         error = true;
     if(sem_close(reindeers_sem))
         error = true;
@@ -191,7 +191,7 @@ void cleanup_semaphores(FILE *f)
     // unlink
     if(sem_unlink(SANTA_SEM))
         error = true;
-    if(sem_unlink(ELVES_HOLIDAYS))
+    if(sem_unlink(CHRISTMAS_WAIT))
         error = true;
     if(sem_unlink(ELVES_SEM))
         error = true;
@@ -397,12 +397,14 @@ void santa_process(FILE *f, args_t args) {
                 for(unsigned i = 0; i < args.nr; i++) {
                     sem_post(reindeers_sem);
                 }
+                sh_mem->workshop_closed = true;
+                sem_post(mutex);
                 break;
             }
         sem_post(mutex);
     }
-    // reindeers are hitched - Christmas can start
-    // todo: add another semaphore - Christmas must start after all reindeers are hitched 
+    // all reindeers are hitched - Christmas can start
+    sem_wait(christmas_wait);
     santa_message(f, SANTA_CHRISTMAS);
 
     exit(0);
@@ -418,7 +420,7 @@ void santa_process(FILE *f, args_t args) {
  */
 void elf_process(FILE *f, unsigned elfID, args_t args) {
     // elf works in a loop until holidays start
-    // while (1) {
+    //while (1) {
 
         // elf started
         elf_message(f, ELF_START, elfID);
@@ -429,7 +431,27 @@ void elf_process(FILE *f, unsigned elfID, args_t args) {
             // error
         }
 
-    // }
+        // when elf stops working he needs help from Santa
+        elf_message(f, ELF_NEED, elfID);
+        
+        // when Christmas warning is on the workshop elves take holidays
+        // WHY MUTEX DOESN'T WORK???????????????????????????????????????????
+      //  sem_wait(mutex);
+            // critical section
+     //       if (sh_mem->workshop_closed) {
+    //            sem_post(mutex);
+      //          break;
+     //       }
+     //   sem_post(mutex);        
+        // he waits in front of workshop and when 3 elves are waiting
+        // they wake up Santa
+
+        // Santa helps him and go back to sleep
+
+        // they go back to work
+
+        
+    //}
     elf_message(f, ELF_HOLIDAYS, elfID);
     (void)args;
     exit(0);
@@ -471,6 +493,15 @@ void reindeer_process(FILE *f, unsigned rdID, args_t args) {
     sem_wait(reindeers_sem);
     // reindeer got hitched
     rd_message(f, RD_HITCHED, rdID);
+
+    // waiting for all reindeers to get hitched
+    sem_wait(mutex);
+        // critical section
+        sh_mem->reindeers_cnt--;
+        if (sh_mem->reindeers_cnt == 0) {
+            sem_post(christmas_wait);
+        }
+    sem_post(mutex);
 
     exit(0);
 }
