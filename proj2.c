@@ -32,16 +32,21 @@ int main (int argc, char *argv[])
     init_memory(f);
     // Setting values to shared variables
     sh_mem->print_count = 0;
+    sh_mem->active = 0;
+    sh_mem->elves_cnt = 0;
+    sh_mem->reindeers_cnt = 0;
+    sh_mem->workshop_closed = false;
 
     // Creating processes (number of processes = number of elves + number of reindeers + Santa)
     for(unsigned i = 0; i < arguments.ne + arguments.nr + 1; i++ ) {
         switch(fork()) {
             case 0:
                 if(i == 0) {
-                    santa_process(f);
+                    santa_process(f, arguments);
                     exit(0);
                 } else if (i <= arguments.ne) {
-                    elf_process(f, i-1, arguments.te);
+                    elf_process(f, i-1, arguments);
+                    printf("Elf s id %u is working.\n", i);
                     switch(fork()) {
                         case 0:
                             break;
@@ -53,7 +58,7 @@ int main (int argc, char *argv[])
                     }
                     exit(0);
                 } else {
-                    reindeer_process(f, i-arguments.ne, arguments.tr);
+                    reindeer_process(f, i-arguments.ne, arguments);
                     switch(fork()) {
                         case 0:
                             break;
@@ -108,17 +113,22 @@ void init_memory(FILE *f)
 void init_semaphores(FILE *f)
 {
     // just to be sure they don't exist
-    sem_unlink(santa_SEM);
-    sem_unlink(elf_SEM);
-    sem_unlink(mutex_SEM);
-    sem_unlink(printing_SEM);
-
+    sem_unlink(SANTA_SEM);
+    sem_unlink(ELVES_SEM);
+    sem_unlink(ELVES_HOLIDAYS);
+    sem_unlink(REINDEERS_SEM);
+    sem_unlink(MUTEX_SEM);
+    sem_unlink(PRINTING_SEM);
 
     bool error = false;
     // map named semaphores
-    if((santa = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0)) == MAP_FAILED)
+    if((santa_sem = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0)) == MAP_FAILED)
         error = true;
-    if((elf = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0)) == MAP_FAILED)
+    if((elves_sem = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0)) == MAP_FAILED)
+        error = true;
+    if((elves_holidays = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0)) == MAP_FAILED)
+        error = true;
+    if((reindeers_sem = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0)) == MAP_FAILED)
         error = true;
     if((mutex = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0)) == MAP_FAILED)
         error = true;
@@ -126,13 +136,17 @@ void init_semaphores(FILE *f)
         error = true;
 
     // open semaphores
-    if ((santa = sem_open(santa_SEM, O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED)
+    if ((santa_sem = sem_open(SANTA_SEM, O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED)
         error = true;
-    if ((elf = sem_open(elf_SEM, O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED)
+    if ((elves_sem = sem_open(ELVES_SEM, O_CREAT | O_EXCL, 0666, 1)) == SEM_FAILED)
         error = true;
-    if ((mutex = sem_open(mutex_SEM, O_CREAT | O_EXCL, 0666, 1)) == SEM_FAILED)
+    if ((elves_holidays = sem_open(ELVES_HOLIDAYS, O_CREAT | O_EXCL, 0666, 1)) == SEM_FAILED)
         error = true;
-    if ((printing = sem_open(printing_SEM, O_CREAT | O_EXCL, 0666, 1)) == SEM_FAILED)
+    if ((reindeers_sem = sem_open(REINDEERS_SEM, O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED)
+        error = true;
+    if ((mutex = sem_open(MUTEX_SEM, O_CREAT | O_EXCL, 0666, 1)) == SEM_FAILED)
+        error = true;
+    if ((printing = sem_open(PRINTING_SEM, O_CREAT | O_EXCL, 0666, 1)) == SEM_FAILED)
         error = true;
 
     if(error)
@@ -161,9 +175,13 @@ void cleanup_semaphores(FILE *f)
 {
     bool error = false;
     // close
-    if(sem_close(santa))
+    if(sem_close(santa_sem))
         error = true;
-    if(sem_close(elf))
+    if(sem_close(elves_sem))
+        error = true;
+    if(sem_close(elves_holidays))
+        error = true;
+    if(sem_close(reindeers_sem))
         error = true;
     if(sem_close(mutex))
         error = true;
@@ -171,13 +189,17 @@ void cleanup_semaphores(FILE *f)
         error = true;
 
     // unlink
-    if(sem_unlink(santa_SEM))
+    if(sem_unlink(SANTA_SEM))
         error = true;
-    if(sem_unlink(elf_SEM))
+    if(sem_unlink(ELVES_HOLIDAYS))
         error = true;
-    if(sem_unlink(mutex_SEM))
+    if(sem_unlink(ELVES_SEM))
         error = true;
-    if(sem_unlink(printing_SEM))
+    if(sem_unlink(REINDEERS_SEM))
+        error = true;
+    if(sem_unlink(MUTEX_SEM))
+        error = true;
+    if(sem_unlink(PRINTING_SEM))
         error = true;
 
     if(error)
@@ -344,6 +366,8 @@ void error_message(FILE *f, int status) {
         case ERR_SEM_DESTROY:
             fprintf(stderr, "Error: Can't destroy semaphores.\n");
             exit(1);
+        case DEBUG:
+            fprintf(stderr, "Debuggg\n");
     }
 }
 /*************** PRINTS.C END *******************/
@@ -353,11 +377,34 @@ void error_message(FILE *f, int status) {
  * @brief Santa process
  * 
  * @param f log will be printed to this file
+ * @param args structure in that command line arguments are stored (ne, nr, te, tr)
  * @return void
  */
-void santa_process(FILE *f) {
-    santa_message(f, SANTA_SLEEP);
-    fprintf(f, "Santaaa\n");
+void santa_process(FILE *f, args_t args) {
+    while (1) {
+        // Santa sleeps in his shop when process starts
+        santa_message(f, SANTA_SLEEP);
+        // santa sleeps and he is woken up by either elves or reindeers
+        sem_wait(santa_sem);
+
+        // santa checks the status
+        sem_wait(mutex);
+            // critical section
+            if (sh_mem->reindeers_cnt == args.nr) {
+                // Santa closes his workshop
+                santa_message(f, SANTA_CLOSE);
+                // reindeers will be hitched
+                for(unsigned i = 0; i < args.nr; i++) {
+                    sem_post(reindeers_sem);
+                }
+                break;
+            }
+        sem_post(mutex);
+    }
+    // reindeers are hitched - Christmas can start
+    // todo: add another semaphore - Christmas must start after all reindeers are hitched 
+    santa_message(f, SANTA_CHRISTMAS);
+
     exit(0);
 }
 
@@ -366,13 +413,25 @@ void santa_process(FILE *f) {
  * 
  * @param f log will be printed to this file
  * @param elfID ID of an elf
- * @param te the maximum time (in ms) for that the elf works independently (0 <= TE <= 1000)
+ * @param args structure in that command line arguments are stored (ne, nr, te, tr)
  * @return void
  */
-void elf_process(FILE *f, unsigned elfID, unsigned te) {
-    elf_message(f, ELF_START, elfID);
-    (void)te;
-    //fprintf(f, "Elf %u a te je %u\n", elfID, te);
+void elf_process(FILE *f, unsigned elfID, args_t args) {
+    // elf works in a loop until holidays start
+    // while (1) {
+
+        // elf started
+        elf_message(f, ELF_START, elfID);
+
+        // elf works independently
+        srand(time(NULL) * getpid() + elfID);
+        if (usleep(rand() % (args.te*1000 + 1))) {
+            // error
+        }
+
+    // }
+    elf_message(f, ELF_HOLIDAYS, elfID);
+    (void)args;
     exit(0);
 }
 
@@ -381,14 +440,38 @@ void elf_process(FILE *f, unsigned elfID, unsigned te) {
  * 
  * @param f log will be printed to this file
  * @param rdID ID of a reindeer
- * @param tr the maximum time (in ms) after that a reindeer returns home (0 <= TR <= 1000)
+ * @param args structure in that command line arguments are stored (ne, nr, te, tr)
  * @return void
  */
-void reindeer_process(FILE *f, unsigned rdID, unsigned tr) {
+
+void reindeer_process(FILE *f, unsigned rdID, args_t args) {
+    // reindeer started
     rd_message(f, RD_START, rdID);
-    (void)tr;
-    //fprintf(f, "RD %u a te je %u\n", rdID, tr);
+
+    // reindeer in on holidays
+    srand(time(NULL) * getpid() + rdID);
+    if (usleep(rand() % (args.tr*1000 - (args.tr*1000)/2 + 1) + (args.tr*1000)/2)) {
+        // error
+    }
+
+    // reindeer returns from holiday
+    rd_message(f, RD_RETURN, rdID);
+
+    // reindeer waits for Santa to get hitched
+    // when the last reindeer returns he wakes up Santa
+    sem_wait(mutex);
+        // critical section
+        sh_mem->reindeers_cnt++;
+        if (sh_mem->reindeers_cnt == args.nr) {
+            sem_post(santa_sem);
+        }
+    sem_post(mutex);
+
+    // waits to get hitched
+    sem_wait(reindeers_sem);
+    // reindeer got hitched
+    rd_message(f, RD_HITCHED, rdID);
+
     exit(0);
 }
-
 /*************** PROCESSES.C END ****************/
