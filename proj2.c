@@ -36,6 +36,8 @@ int main (int argc, char *argv[])
     sh_mem->elves_cnt = 0;
     sh_mem->reindeers_cnt = 0;
     sh_mem->workshop_closed = false;
+    sh_mem->elves_helped = 0;
+    sh_mem->santa_helping = false;
 
     // Creating processes (number of processes = number of elves + number of reindeers + Santa)
     for(unsigned i = 0; i < arguments.ne + arguments.nr + 1; i++ ) {
@@ -43,10 +45,10 @@ int main (int argc, char *argv[])
             case 0:
                 if(i == 0) {
                     santa_process(f, arguments);
-                    exit(0);
+                    //exit(0);
                 } else if (i <= arguments.ne) {
                     elf_process(f, i-1, arguments);
-                    printf("Elf s id %u is working.\n", i);
+                    //printf("Elf s id %u is working.\n", i);
                     switch(fork()) {
                         case 0:
                             break;
@@ -119,6 +121,7 @@ void init_semaphores(FILE *f)
     sem_unlink(REINDEERS_SEM);
     sem_unlink(MUTEX_SEM);
     sem_unlink(PRINTING_SEM);
+    sem_unlink(SANTA_HELP_SEM);
 
     bool error = false;
     /*
@@ -139,7 +142,7 @@ void init_semaphores(FILE *f)
     // open semaphores
     if ((santa_sem = sem_open(SANTA_SEM, O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED)
         error = true;
-    if ((elves_sem = sem_open(ELVES_SEM, O_CREAT | O_EXCL, 0666, 1)) == SEM_FAILED)
+    if ((elves_sem = sem_open(ELVES_SEM, O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED)
         error = true;
     if ((christmas_wait = sem_open(CHRISTMAS_WAIT, O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED)
         error = true;
@@ -148,6 +151,8 @@ void init_semaphores(FILE *f)
     if ((mutex = sem_open(MUTEX_SEM, O_CREAT | O_EXCL, 0666, 1)) == SEM_FAILED)
         error = true;
     if ((printing = sem_open(PRINTING_SEM, O_CREAT | O_EXCL, 0666, 1)) == SEM_FAILED)
+        error = true;
+    if ((santa_help = sem_open(SANTA_HELP_SEM, O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED)
         error = true;
 
     if(error)
@@ -188,6 +193,8 @@ void cleanup_semaphores(FILE *f)
         error = true;
     if(sem_close(printing))
         error = true;
+    if(sem_close(santa_help))
+        error = true;
 
     // unlink
     if(sem_unlink(SANTA_SEM))
@@ -201,6 +208,8 @@ void cleanup_semaphores(FILE *f)
     if(sem_unlink(MUTEX_SEM))
         error = true;
     if(sem_unlink(PRINTING_SEM))
+        error = true;
+    if(sem_unlink(SANTA_HELP_SEM))
         error = true;
 
     if(error)
@@ -387,22 +396,38 @@ void santa_process(FILE *f, args_t args) {
         santa_message(f, SANTA_SLEEP);
         // santa sleeps and he is woken up by either elves or reindeers
         sem_wait(santa_sem);
-
+        printf("Santa after sem_wait\n");
         // santa checks the status
         sem_wait(mutex);
             // critical section
             if (sh_mem->reindeers_cnt == args.nr) {
+                //sem_post(mutex);
                 // Santa closes his workshop
                 santa_message(f, SANTA_CLOSE);
                 // reindeers will be hitched
                 for(unsigned i = 0; i < args.nr; i++) {
                     sem_post(reindeers_sem);
                 }
+                //sem_wait(mutex);
                 sh_mem->workshop_closed = true;
+                while (sh_mem->elves_cnt > 0) { // nebo >=
+                    sem_post(elves_sem);
+                    sh_mem->elves_cnt--;
+                }
                 sem_post(mutex);
                 break;
-            }
+            // if there are 3 elves waiting, Santa helps them
+            } else if (sh_mem->elves_cnt >= 3) {
+                santa_message(f, SANTA_HELP);
+                sh_mem->elves_helped=3;
+                for (unsigned i = 0; i < 3; i++) {
+                    sem_post(elves_sem);
+                }
+                //sh_mem->santa_helping = true;
+            } 
         sem_post(mutex);
+
+        //sem_wait(santa_help);
     }
     // all reindeers are hitched - Christmas can start
     sem_wait(christmas_wait);
@@ -421,11 +446,10 @@ void santa_process(FILE *f, args_t args) {
  */
 void elf_process(FILE *f, unsigned elfID, args_t args) {
     // elf works in a loop until holidays start
+    // elf started
+    elf_message(f, ELF_START, elfID);
+
     while (1) {
-
-        // elf started
-        elf_message(f, ELF_START, elfID);
-
         // elf works independently
         srand(time(NULL) * getpid() + elfID);
         if (usleep(rand() % (args.te*1000 + 1))) {
@@ -442,19 +466,45 @@ void elf_process(FILE *f, unsigned elfID, args_t args) {
                 sem_post(mutex);
                 break;
             }
-        sem_post(mutex);    
-
-        // he waits in front of workshop and when 3 elves are waiting
-        // they wake up Santa
-
-        // Santa helps him and go back to sleep
-
-        // they go back to work
-
+            // when 3 elves are waiting for Santa they wake up him
+            sh_mem->elves_cnt++;
+            if (sh_mem->elves_cnt >= 3) {
+                sem_post(santa_sem);
+            }
+        sem_post(mutex);
         
+        // he waits in front of workshop
+        sem_wait(elves_sem);
+        
+        // elf got help
+        sem_wait(mutex);
+            // critical section
+            // if holidays start the elves will break
+            if (sh_mem->workshop_closed) {
+                sem_post(mutex);
+                break;
+            }
+        sem_post(mutex);
+
+        elf_message(f, ELF_GET, elfID);
+
+        /*
+        sem_wait(mutex);
+            // critical section
+            sh_mem->elves_helped--;
+            sh_mem->elves_cnt--;
+            if (sh_mem->elves_helped == 0) {
+                // probudit santu
+                sem_post(santa_help);
+                //sh_mem->santa_helping = false;
+            }
+        sem_post(mutex);
+        */
+       // he goes back to work
     }
+    // Christmas started - elves are taking holidays
     elf_message(f, ELF_HOLIDAYS, elfID);
-    (void)args;
+
     exit(0);
 }
 
