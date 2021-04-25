@@ -63,8 +63,9 @@ int main (int argc, char *argv[])
     exit(0);
 }
 
+/*************** SETUP AND CLEANUP FUNCTIONS *******************/
 /**
- * @brief Function maps shared memory. When error occurs it calls error_message() function.
+ * @brief Function maps shared memory. When error occurs it calls the error_message() function.
  * 
  * @param f file that must be closed in case error occurs
  * @param args struct where parametres of the program are stored (ne, nr, te, tr)
@@ -77,24 +78,21 @@ void init_memory(FILE *f, args_t args)
     
     // Setting values to shared variables
     sh_mem->print_count = 0;
-    sh_mem->active = 0;
     sh_mem->elves_cnt = 0;
     sh_mem->reindeers_cnt = args.nr;
     sh_mem->workshop_closed = false;
     sh_mem->elves_helped = 0;
-    sh_mem->santa_helping = false;
-
 }
 
 /**
- * @brief Function maps and opens semaphores. When error occurs it calls error_message() function.
+ * @brief Function maps and opens semaphores. When error occurs it calls the error_message() function.
  * 
  * @param f file that must be closed in case error occurs
  * @return void
  */
 void init_semaphores(FILE *f)
 {
-    // just to be sure they don't exist
+    // if semaphores with this names exist, we don't want to use them
     sem_unlink(SANTA_SEM);
     sem_unlink(ELVES_SEM);
     sem_unlink(CHRISTMAS_WAIT);
@@ -104,7 +102,6 @@ void init_semaphores(FILE *f)
     sem_unlink(SANTA_HELP_SEM);
 
     bool error = false;
-
     // open semaphores
     if ((santa_sem = sem_open(SANTA_SEM, O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED)
         error = true;
@@ -122,11 +119,11 @@ void init_semaphores(FILE *f)
         error = true;
 
     if(error)
-        error_message(f, ERR_SEM_INIT);
+        error_message(f, ERR_SEM_OPEN);
 }
 
 /**
- * @brief Function unmaps shared memory. When error occurs it calls error_message() function.
+ * @brief Function unmaps shared memory. When error occurs it calls the error_message() function.
  * 
  * @param f file that must be closed in case error occurs
  * @return void
@@ -138,7 +135,7 @@ void cleanup_memory(FILE *f)
 }
 
 /**
- * @brief Function closes and unlinks semaphores. When error occurs it calls error_message() function.
+ * @brief Function closes and unlinks semaphores. When error occurs it calls the error_message() function.
  * 
  * @param f file that must be closed in case error occurs
  * @return void
@@ -146,6 +143,7 @@ void cleanup_memory(FILE *f)
 void cleanup_semaphores(FILE *f)
 {
     bool error = false;
+    
     // close
     if(sem_close(santa_sem))
         error = true;
@@ -226,7 +224,7 @@ int argument_parser(int argc, char *argv[], args_t *args) {
     return 0;
 }
 
-/*************** PRINTS.C BEGIN *******************/
+/*************** PRINT FUNCTIONS *******************/
 /**
  * @brief Function prints santa message to a file.
  * 
@@ -325,30 +323,35 @@ void error_message(FILE *f, int status) {
         case ERR_ARGS:
             fprintf(stderr, "Error: Invalid arguments.\n");
             fclose(f);
-            exit(2);
+            exit(1);
+        case ERR_SEM_OPEN:
+            fprintf(stderr, "Error: Can't open semaphores.\n");
+            fclose(f);
+            exit(1);
+        case ERR_MEM_INIT:
+            fprintf(stderr, "Error: Can't initialize shared memory.\n");
+            cleanup_semaphores(f);
+            fclose(f);
+            exit(1);
         case ERR_FORK:
             fprintf(stderr, "Error: Can't create another process.\n");
             cleanup_memory(f);
             cleanup_semaphores(f);
             fclose(f);
-            exit(3);
-        case ERR_SEM_INIT:
-            fprintf(stderr, "Error: Can't initialize semaphores.\n");
+            exit(1);
+        case ERR_MEM_UNMAP:
+            fprintf(stderr, "Error: Can't unmap shared memory.\n");
+            cleanup_semaphores(f);
             fclose(f);
-            exit(3);
-        case ERR_SEM_OPEN:
-            fprintf(stderr, "Error\n");
             exit(1);
         case ERR_SEM_DESTROY:
             fprintf(stderr, "Error: Can't destroy semaphores.\n");
+            fclose(f);
             exit(1);
-        case DEBUG:
-            fprintf(stderr, "Debuggg\n");
     }
 }
-/*************** PRINTS.C END *******************/
 
-/*************** PROCESSES.C BEGIN **************/
+/*************** PROCESS FUNCTIONS **************/
 /**
  * @brief Santa process
  * 
@@ -387,22 +390,20 @@ void santa_process(FILE *f, args_t args) {
         for (unsigned i = 0; i < 3; i++) {
             sem_post(elves_sem);
         }
-        // Santa pocka, nez vsem elfum pomuze
+        // santa waits until 3 elves print they get help
         sem_wait(santa_help);
     }
-    // Santa closes his workshop
+    // santa closes his workshop
     santa_message(f, SANTA_CLOSE);
 
-    // reindeers will be hitched
+    // reindeers can be hitched
     for(unsigned i = 0; i < args.nr; i++) {
         sem_post(reindeers_sem);
     }
-    // santa propusti vsechny elfy
-    // zmenit pak cislo na to, kolik jich fakt ceka
+    // elves can go on holidays
     for (unsigned i = 0; i < args.ne; i++) {
         sem_post(elves_sem);
     }
-
     // all reindeers are hitched - Christmas can start
     sem_wait(christmas_wait);
     santa_message(f, SANTA_CHRISTMAS);
@@ -421,7 +422,7 @@ void elf_process(FILE *f, unsigned elfID, args_t args) {
     // elf started
     elf_message(f, ELF_START, elfID);
    
-    // elf works in a loop until holidays start
+    // elf works in a loop until the workshop closes
     while(1) {
         // elf works independently
         srand(time(NULL) * getpid() + elfID);
@@ -430,7 +431,7 @@ void elf_process(FILE *f, unsigned elfID, args_t args) {
         // when elf stops working he needs help from Santa
         elf_message(f, ELF_NEED, elfID);
 
-        // when there are 3 elves waiting for Santa they wake up him
+        // when there are 3 elves waiting for Santa they wake him up
         sem_wait(mutex);
             // critical section
             sh_mem->elves_cnt++;
@@ -439,7 +440,7 @@ void elf_process(FILE *f, unsigned elfID, args_t args) {
             }
         sem_post(mutex);
 
-        // elf waits in front of workshop
+        // elf waits in front of the workshop
         sem_wait(elves_sem);
 
         // when Christmas warning is on the workshop elf takes holidays
@@ -462,7 +463,7 @@ void elf_process(FILE *f, unsigned elfID, args_t args) {
             }
         sem_post(mutex);
     }
-    // Christmas started - elves are taking holidays
+    // Christmas started - ef is going on holidays
     elf_message(f, ELF_HOLIDAYS, elfID);
     exit(0);
 }
@@ -486,7 +487,7 @@ void reindeer_process(FILE *f, unsigned rdID, args_t args) {
     // reindeer returns home
     rd_message(f, RD_RETURN, rdID);
     
-    // when the last reindeer returns he wakes up Santa
+    // when the last reindeer returns he wakes Santa up
     sem_wait(mutex);
         // critical section
         sh_mem->reindeers_cnt--;
@@ -505,6 +506,7 @@ void reindeer_process(FILE *f, unsigned rdID, args_t args) {
     sem_wait(mutex);
         // critical section
         sh_mem->reindeers_cnt++;
+        // when all reindeers are hitched Christmas can start
         if (sh_mem->reindeers_cnt == args.nr) {
             sem_post(christmas_wait);
         }
@@ -512,4 +514,5 @@ void reindeer_process(FILE *f, unsigned rdID, args_t args) {
 
     exit(0);
 }
-/*************** PROCESSES.C END ****************/
+
+/*** end of file proj2.c ***/
