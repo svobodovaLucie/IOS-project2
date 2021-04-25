@@ -1,3 +1,12 @@
+/**
+ * FIT VUT 2020/2021
+ * IOS - Projekt 2
+ * Santa Claus problem
+ * Author: Lucie Svobodová, xsvobo1x
+ * Date: 25.04.2021
+ * proj2.h
+ **/
+
 #ifndef __PROJ2_H__
 #define __PROJ2_H__
 
@@ -26,6 +35,7 @@
 #define REINDEERS_SEM "/xsvobo1x-reindeers_sem"
 #define MUTEX_SEM "/xsvobo1x-mutex"
 #define PRINTING_SEM "/xsvobo1x-printing"
+#define SANTA_HELP_SEM "/xsvobo1x-santa-help-sem"
 /**
  * Structure used for shared memory
  */
@@ -35,6 +45,8 @@ typedef struct shared {
     unsigned reindeers_cnt;
     unsigned elves_cnt;
     bool workshop_closed;
+    unsigned elves_helped;
+    bool santa_helping;
 } shared_t;
 
 /**
@@ -47,7 +59,7 @@ typedef struct args {
     unsigned tr;
 } args_t;
 
-sem_t *santa_sem, *elves_sem, *christmas_wait, *reindeers_sem, *mutex, *printing;
+sem_t *santa_sem, *elves_sem, *christmas_wait, *reindeers_sem, *mutex, *printing, *santa_help;
 
 shared_t *sh_mem = NULL;
 
@@ -70,11 +82,11 @@ void reindeer_process(FILE *f, unsigned rdID, args_t args);
 /**************** PROCESSES.H END *********************/
 
 /**************** SETUP.H BEGIN ***********************/
-void init_memory();
-void init_semaphores();
-void cleanup_memory();
-void cleanup_semaphores();
-int argument_parser(int argc, char *argv[], args_t *arguments);
+void init_memory(FILE *f, args_t args);
+void init_semaphores(FILE *f);
+void cleanup_memory(FILE *f);
+void cleanup_semaphores(FILE *f);
+int argument_parser(int argc, char *argv[], args_t *args);
 /**************** SETUP.H END *************************/
 
 #endif
